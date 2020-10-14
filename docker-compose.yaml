@@ -1,0 +1,115 @@
+version: "3.3"
+services:
+  traefik:
+    image: "traefik:v2.0.0-rc3"
+    container_name: "traefik"
+    command:
+      #- "--log.level=DEBUG"
+      - "--api.insecure=true"
+      - "--providers.docker=true"
+      - "--providers.docker.exposedbydefault=false"
+      - "--entrypoints.web.address=:80"
+    ports:
+      - "80:80"
+      - "443:8080"
+    volumes:
+      - "/var/run/docker.sock:/var/run/docker.sock:ro"
+
+  jenkins:
+    image: jenkinsci/blueocean
+    user: root
+    environment:
+        - JENKINS_OPTS="--prefix=/jenkins"
+    volumes:
+        - jenkins_data:/var/jenkins_home
+        - /var/run/docker.sock:/var/run/docker.sock
+    labels:
+        - "traefik.enable=true"
+        - traefik.http.routers.jenkins.rule=Host(`localhost`)&&PathPrefix(`/jenkins/`)
+        - traefik.http.routers.jenkins.entrypoints=web
+        - traefik.http.services.jenkins.loadbalancer.server.port=8080
+        
+
+  sonar: 
+    image: sonarqube:8.2-community
+    depends_on:
+        - db-sonar
+    environment:
+        SONAR_JDBC_URL: jdbc:postgresql://db-sonar:5432/sonar
+        SONAR_JDBC_USERNAME: sonar
+        SONAR_JDBC_PASSWORD: sonar
+        sonar.web.context: /sonar
+    volumes:
+        - sonarqube_data:/opt/sonarqube/data
+    labels:
+        - "traefik.enable=true"
+        - traefik.http.routers.sonar.rule=Host(`localhost`)&&PathPrefix(`/sonar/`)
+        - traefik.http.routers.sonar.entrypoints=web
+        - traefik.http.services.sonar.loadbalancer.server.port=9000
+  
+  db-sonar:
+    image: postgres
+    environment:
+        POSTGRES_DB: sonar
+        POSTGRES_USER: sonar
+        POSTGRES_PASSWORD: sonar
+    volumes:
+        - postgresql_sonar_data:/var/lib/postgresql/data
+  
+  gitea: 
+    image: gitea/gitea:latest
+    restart: always
+    environment: 
+      - DB_TYPE=postgres
+      - DB_HOST=db-gitea:5432
+      - DB_NAME=gitea
+      - DB_USER=gitea
+      - DB_PASSWD=gitea
+    volumes:
+      - gitea_data:/data
+    labels:
+        - "traefik.enable=true"
+        - traefik.http.routers.gitea.rule=Host(`localhost`)&&PathPrefix(`/gitea/`)
+        - traefik.http.routers.gitea.entrypoints=web
+        - traefik.http.services.gitea.loadbalancer.server.port=3000
+
+  db-gitea:
+    image: postgres
+    environment:
+        POSTGRES_USER: gitea
+        POSTGRES_PASSWORD: gitea
+        POSTGRES_DB: gitea
+    volumes:
+        - postgresql_gitea_data:/var/lib/postgresql/data
+
+  nexus:
+    image: sonatype/nexus3
+    environment:
+      NEXUS_CONTEXT: /app
+    volumes:
+        - nexus-data:/nexus-data
+    labels:
+        - "traefik.enable=true"
+        - traefik.http.routers.nexus.rule=Host(`localhost`)&&PathPrefix(`/nexus/`)
+        - traefik.http.routers.nexus.entrypoints=web
+        - traefik.http.services.nexus.loadbalancer.server.port=8081
+
+  picdemo-mariadb:
+      image: mariadb:10.4.6
+      volumes:
+          - mariadb_pics_data:/var/lib/mysql/
+      environment:
+          - MYSQL_USER=root
+          - MYSQL_ALLOW_EMPTY_PASSWORD=yes
+          - MYSQL_DATABASE=picdemo
+      command: mysqld --lower_case_table_names=1 --skip-ssl --character_set_server=utf8mb4 --explicit_defaults_for_timestamp
+
+  
+volumes:
+    sonarqube_data:
+    mariadb_pics_data:
+    postgresql_sonar_data:
+    postgresql_gitea_data:
+    gitea_data:
+    nexus-data:
+    jenkins_data:
